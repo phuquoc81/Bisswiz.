@@ -1,0 +1,5 @@
+# Phuoptimizer-81 Requirements
+# Python 3.6 or higher required
+
+# Core dependencies (using only standard library for maximum compatibility)
+# No external dependencies required - uses Python standard library only
