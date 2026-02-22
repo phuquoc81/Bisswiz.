@@ -263,7 +263,6 @@ body {
 
 .card-backs {
     display: flex;
-    gap: -6px;
 }
 
 .card-back {

@@ -263,8 +263,8 @@ function endRound() {
         addLog(`${p.name}: bid ${p.bid}, got ${p.tricks} → ${delta >= 0 ? '+' : ''}${delta} (total ${p.score})`);
     }
 
-    const winner = game.players.find(p => p.score >= WINNING_SCORE);
-    if (winner) {
+    const contenders = game.players.filter(p => p.score >= WINNING_SCORE);
+    if (contenders.length > 0) {
         game.phase = 'gameOver';
     }
 
