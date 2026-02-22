@@ -1,442 +1,565 @@
-// Phu AI - Quantum ZX Core Implementation
+// Bisswiz Card Game
 
-class PhuAI {
-    constructor() {
-        this.quantumState = 'Superposition';
-        this.entanglement = 81;
-        this.optimizationLevel = 81;
-        this.phubersProtocol = 'quantum';
-        this.quantumBoost = true;
-        this.activityLog = [];
-        this.init();
+// ===== Constants =====
+const SUITS = ['♠', '♥', '♦', '♣'];
+const SUIT_NAMES = { '♠': 'Spades', '♥': 'Hearts', '♦': 'Diamonds', '♣': 'Clubs' };
+const SUIT_COLORS = { '♠': 'black', '♥': 'red', '♦': 'red', '♣': 'black' };
+const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+const RANK_VALUES = { '2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14 };
+const WINNING_SCORE = 500;
+const TOTAL_TRICKS = 13;
+
+// ===== Game State =====
+let game = null;
+
+// ===== Card Helpers =====
+function createDeck() {
+    const deck = [];
+    for (const suit of SUITS) {
+        for (const rank of RANKS) {
+            deck.push({ suit, rank, value: RANK_VALUES[rank] });
+        }
+    }
+    return deck;
+}
+
+function shuffle(deck) {
+    for (let i = deck.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+    return deck;
+}
+
+function sortHand(hand) {
+    const suitOrder = { '♠': 0, '♥': 1, '♦': 2, '♣': 3 };
+    hand.sort((a, b) => {
+        if (a.suit !== b.suit) return suitOrder[a.suit] - suitOrder[b.suit];
+        return a.value - b.value;
+    });
+}
+
+// ===== Scoring =====
+/**
+ * Bisswiz scoring rules:
+ *   bid === 13 AND tricks === 13  → +260
+ *   bid === 13 AND tricks < 13   → −260
+ *   bid < 13  AND tricks >= bid  → +10 × bid
+ *   bid < 13  AND tricks < bid   → −10 × bid
+ * Over-tricks beyond your bid give no bonus.
+ */
+function calculateScore(bid, tricks) {
+    if (bid === 13) {
+        return tricks === 13 ? 260 : -260;
+    }
+    return tricks >= bid ? 10 * bid : -(10 * bid);
+}
+
+// ===== Trick Logic =====
+function cardBeats(card, other, ledSuit, trumpSuit) {
+    const cardTrump = card.suit === trumpSuit;
+    const otherTrump = other.suit === trumpSuit;
+    if (cardTrump && !otherTrump) return true;
+    if (!cardTrump && otherTrump) return false;
+    if (card.suit === other.suit) return card.value > other.value;
+    // card is not trump, not same suit as other → can't beat
+    if (card.suit === ledSuit) return true;
+    return false;
+}
+
+function getTrickWinner(trick, ledSuit, trumpSuit) {
+    let winner = trick[0];
+    for (let i = 1; i < trick.length; i++) {
+        if (cardBeats(trick[i].card, winner.card, ledSuit, trumpSuit)) {
+            winner = trick[i];
+        }
+    }
+    return winner;
+}
+
+function isValidPlay(card, hand, ledSuit) {
+    if (!ledSuit) return true;
+    if (card.suit === ledSuit) return true;
+    return !hand.some(c => c.suit === ledSuit);
+}
+
+// ===== AI =====
+function aiCalculateBid(hand, trumpSuit) {
+    let bid = 0;
+    for (const card of hand) {
+        if (card.value === 14) bid++;                               // Aces
+        else if (card.value === 13) bid++;                          // Kings
+        else if (card.suit === trumpSuit && card.value >= 10) bid++; // Trump face cards
+    }
+    return Math.min(bid, 13);
+}
+
+function aiChooseCard(player, trick, ledSuit, trumpSuit, numPlayers) {
+    const valid = player.hand.filter(c => isValidPlay(c, player.hand, ledSuit));
+
+    if (trick.length === 0) {
+        // Leading: play highest card in a strong suit, prefer trump if many
+        const trumpCards = valid.filter(c => c.suit === trumpSuit);
+        const nonTrump = valid.filter(c => c.suit !== trumpSuit);
+        const pool = nonTrump.length > 0 ? nonTrump : trumpCards;
+        return pool.reduce((best, c) => c.value > best.value ? c : best);
     }
 
-    init() {
-        this.setupEventListeners();
-        this.startQuantumCore();
-        this.logActivity('Phu AI System Initialized');
-        this.logActivity('Phuoptimizer 81 Online');
-        this.logActivity('Phubers Protocol: Quantum Mode Active');
-        this.logActivity('Quantum ZX Core: Ready');
-    }
+    const currentWinner = getTrickWinner(trick, ledSuit, trumpSuit);
+    const aiWinning = currentWinner.playerIdx === player.idx;
 
-    setupEventListeners() {
-        // Solve button
-        document.getElementById('solveBtn').addEventListener('click', () => this.solvePuzzle());
-        
-        // Enter key in textarea
-        document.getElementById('puzzleInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && e.ctrlKey) {
-                this.solvePuzzle();
-            }
+    if (!aiWinning) {
+        // Try to win with lowest winning card
+        const winners = valid.filter(c => cardBeats(c, currentWinner.card, ledSuit, trumpSuit));
+        if (winners.length > 0) {
+            return winners.reduce((min, c) => c.value < min.value ? c : min);
+        }
+    }
+    // Can't win or already winning: play lowest card
+    return valid.reduce((min, c) => c.value < min.value ? c : min);
+}
+
+// ===== Game Object Factory =====
+function createGame(numPlayers, humanName) {
+    const names = [humanName || 'You', 'Alice', 'Bob', 'Carol'];
+    const players = [];
+    for (let i = 0; i < numPlayers; i++) {
+        players.push({
+            idx: i,
+            name: i === 0 ? (humanName || 'You') : names[i],
+            isHuman: i === 0,
+            hand: [],
+            bid: null,
+            tricks: 0,
+            score: 0,
         });
+    }
+    return {
+        numPlayers,
+        players,
+        trumpSuit: null,
+        trick: [],          // {card, playerIdx}
+        ledSuit: null,
+        currentPlayer: 0,
+        leadPlayer: 0,
+        trickNumber: 0,     // 0-based, increments after each trick completes
+        roundNumber: 0,
+        phase: 'setup',     // setup | bidding | playing | roundEnd | gameOver
+        biddingTurn: 0,     // which player's turn to bid (index into players)
+        log: [],
+    };
+}
 
-        // Optimization level slider
-        const optLevel = document.getElementById('optLevel');
-        optLevel.addEventListener('input', (e) => {
-            this.optimizationLevel = e.target.value;
-            document.getElementById('optLevelValue').textContent = e.target.value;
-            this.updateOptimizerStatus();
-        });
+function addLog(msg) {
+    if (!game) return;
+    game.log.unshift(msg);
+    if (game.log.length > 60) game.log.length = 60;
+}
 
-        // Quantum boost toggle
-        document.getElementById('quantumBoost').addEventListener('change', (e) => {
-            this.quantumBoost = e.target.checked;
-            this.updateOptimizerStatus();
-        });
+// ===== Round Setup =====
+function startRound() {
+    game.roundNumber++;
+    game.trickNumber = 0;
+    game.trick = [];
+    game.ledSuit = null;
 
-        // Phubers protocol selector
-        document.getElementById('phubersProtocol').addEventListener('change', (e) => {
-            this.phubersProtocol = e.target.value;
-            this.updateOptimizerStatus();
-        });
+    // Choose random trump
+    game.trumpSuit = SUITS[Math.floor(Math.random() * SUITS.length)];
+
+    // Deal cards
+    const deck = shuffle(createDeck());
+    for (const p of game.players) {
+        p.hand = deck.splice(0, TOTAL_TRICKS);
+        p.bid = null;
+        p.tricks = 0;
+        sortHand(p.hand);
     }
 
-    startQuantumCore() {
-        this.renderQuantumVisualization();
-        this.updateQuantumStats();
-        
-        // Update quantum state periodically
-        setInterval(() => {
-            this.updateQuantumStats();
-        }, 2000);
+    // Starting player rotates each round
+    game.leadPlayer = (game.roundNumber - 1) % game.numPlayers;
+    game.currentPlayer = game.leadPlayer;
+    game.biddingTurn = 0; // count of bids placed so far
 
-        // Animate quantum visualization
-        setInterval(() => {
-            this.renderQuantumVisualization();
-        }, 50);
-    }
+    game.phase = 'bidding';
+    addLog(`Round ${game.roundNumber} — Trump: ${SUIT_NAMES[game.trumpSuit]} ${game.trumpSuit}`);
 
-    renderQuantumVisualization() {
-        const canvas = document.getElementById('quantumCanvas');
-        const ctx = canvas.getContext('2d');
-        
-        // Set canvas size
-        canvas.width = canvas.offsetWidth;
-        canvas.height = canvas.offsetHeight;
+    render();
+    processAITurn();
+}
 
-        // Clear canvas
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+// ===== Bidding =====
+function placeBid(bid) {
+    const p = game.players[game.currentPlayer];
+    p.bid = bid;
+    addLog(`${p.name} bids ${bid}`);
+    game.biddingTurn++;
 
-        // Draw quantum particles
-        const time = Date.now() / 1000;
-        const particles = 81; // Phuoptimizer 81 themed
-
-        for (let i = 0; i < particles; i++) {
-            const angle = (i / particles) * Math.PI * 2 + time;
-            const radius = 50 + Math.sin(time + i) * 30;
-            const x = canvas.width / 2 + Math.cos(angle) * radius;
-            const y = canvas.height / 2 + Math.sin(angle) * radius;
-            
-            const hue = (i / particles) * 360 + time * 50;
-            ctx.fillStyle = `hsla(${hue}, 100%, 50%, 0.8)`;
-            ctx.beginPath();
-            ctx.arc(x, y, 3, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Draw connections
-            if (i < particles - 1) {
-                const nextAngle = ((i + 1) / particles) * Math.PI * 2 + time;
-                const nextX = canvas.width / 2 + Math.cos(nextAngle) * radius;
-                const nextY = canvas.height / 2 + Math.sin(nextAngle) * radius;
-                
-                ctx.strokeStyle = `hsla(${hue}, 100%, 50%, 0.2)`;
-                ctx.lineWidth = 1;
-                ctx.beginPath();
-                ctx.moveTo(x, y);
-                ctx.lineTo(nextX, nextY);
-                ctx.stroke();
-            }
-        }
-
-        // Draw center core
-        ctx.fillStyle = '#1bffff';
-        ctx.shadowBlur = 20;
-        ctx.shadowColor = '#1bffff';
-        ctx.beginPath();
-        ctx.arc(canvas.width / 2, canvas.height / 2, 10 + Math.sin(time * 2) * 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = 0;
-    }
-
-    updateQuantumStats() {
-        // Simulate quantum state changes
-        const states = ['Superposition', 'Entangled', 'Coherent', 'Optimized'];
-        this.quantumState = states[Math.floor(Math.random() * states.length)];
-        document.getElementById('quantumState').textContent = this.quantumState;
-
-        // Update entanglement
-        this.entanglement = 75 + Math.floor(Math.random() * 15);
-        document.getElementById('entanglement').textContent = this.entanglement + '%';
-
-        // Generate future prediction
-        const predictions = [
-            'Positive Outcome',
-            'High Efficiency',
-            'Optimal Solution',
-            'Quantum Advantage',
-            'Peak Performance',
-            'Success Probability: 81%'
-        ];
-        document.getElementById('prediction').textContent = 
-            predictions[Math.floor(Math.random() * predictions.length)];
-    }
-
-    solvePuzzle() {
-        const input = document.getElementById('puzzleInput').value.trim();
-        
-        if (!input) {
-            this.showOutput('Please enter a puzzle or problem to solve.', 'error');
-            return;
-        }
-
-        this.logActivity(`Processing: ${input.substring(0, 50)}...`);
-        this.showOutput('🔮 Phu AI is analyzing with Quantum ZX Core...', 'processing');
-
-        // Simulate processing time
-        setTimeout(() => {
-            const solution = this.generateSolution(input);
-            this.showOutput(solution, 'success');
-            this.logActivity('Solution generated successfully');
-        }, 1500);
-    }
-
-    generateSolution(input) {
-        const lowerInput = input.toLowerCase();
-
-        // Math problems
-        if (lowerInput.includes('+') || lowerInput.includes('plus')) {
-            return this.solveMath(input, '+');
-        }
-        if (lowerInput.includes('-') || lowerInput.includes('minus')) {
-            return this.solveMath(input, '-');
-        }
-        if (lowerInput.includes('*') || lowerInput.includes('×') || lowerInput.includes('times')) {
-            return this.solveMath(input, '*');
-        }
-        if (lowerInput.includes('/') || lowerInput.includes('÷') || lowerInput.includes('divided')) {
-            return this.solveMath(input, '/');
-        }
-
-        // Fibonacci
-        if (lowerInput.includes('fibonacci')) {
-            const n = this.extractNumber(input);
-            if (n !== null) {
-                return this.solveFibonacci(n);
-            }
-        }
-
-        // Prime numbers
-        if (lowerInput.includes('prime')) {
-            const n = this.extractNumber(input);
-            if (n !== null) {
-                return this.solvePrime(n);
-            }
-        }
-
-        // Factorial
-        if (lowerInput.includes('factorial')) {
-            const n = this.extractNumber(input);
-            if (n !== null) {
-                return this.solveFactorial(n);
-            }
-        }
-
-        // Pattern recognition
-        if (lowerInput.includes('pattern') || lowerInput.includes('sequence')) {
-            return this.analyzePattern(input);
-        }
-
-        // Future prediction
-        if (lowerInput.includes('future') || lowerInput.includes('predict')) {
-            return this.predictFuture(input);
-        }
-
-        // Default quantum analysis
-        return this.quantumAnalysis(input);
-    }
-
-    solveMath(input, operator) {
-        const numbers = input.match(/-?\d+\.?\d*/g);
-        if (numbers && numbers.length >= 2) {
-            const a = parseFloat(numbers[0]);
-            const b = parseFloat(numbers[1]);
-            let result;
-            
-            switch(operator) {
-                case '+':
-                    result = a + b;
-                    break;
-                case '-':
-                    result = a - b;
-                    break;
-                case '*':
-                    result = a * b;
-                    break;
-                case '/':
-                    if (b === 0) {
-                        return `
-                            <h3>❌ Error</h3>
-                            <p><strong>Cannot divide by zero</strong></p>
-                            <p>Division by zero is undefined in mathematics.</p>
-                            <p><strong>Phu AI Suggestion:</strong> Please check your input values.</p>
-                        `;
-                    }
-                    result = a / b;
-                    break;
-            }
-
-            return `
-                <h3>✅ Solution Found!</h3>
-                <p><strong>Calculation:</strong> ${a} ${operator} ${b} = ${result}</p>
-                <p><strong>Phuoptimizer 81 Analysis:</strong> Optimized at level ${this.optimizationLevel}</p>
-                <p><strong>Quantum Confidence:</strong> ${this.entanglement}%</p>
-                <p><strong>Phubers Protocol:</strong> ${this.phubersProtocol.toUpperCase()} mode active</p>
-            `;
-        }
-        return this.quantumAnalysis(input);
-    }
-
-    solveFibonacci(n) {
-        if (n < 0 || n > 50) {
-            return `<p>Please enter a number between 0 and 50 for Fibonacci calculation.</p>`;
-        }
-
-        const fib = (num) => {
-            if (num <= 1) return num;
-            let a = 0, b = 1;
-            for (let i = 2; i <= num; i++) {
-                [a, b] = [b, a + b];
-            }
-            return b;
-        };
-
-        const result = fib(n);
-        const sequence = [];
-        for (let i = 0; i <= Math.min(n, 10); i++) {
-            sequence.push(fib(i));
-        }
-
-        return `
-            <h3>✅ Fibonacci Solution</h3>
-            <p><strong>Fibonacci(${n}):</strong> ${result}</p>
-            <p><strong>Sequence:</strong> ${sequence.join(', ')}${n > 10 ? '...' : ''}</p>
-            <p><strong>Quantum ZX Core:</strong> Calculated using ${this.phubersProtocol} acceleration</p>
-            <p><strong>Processing Power:</strong> Phuoptimizer 81 at level ${this.optimizationLevel}</p>
-        `;
-    }
-
-    solvePrime(n) {
-        if (n < 2) {
-            return `<p>${n} is not a prime number.</p>`;
-        }
-
-        const isPrime = (num) => {
-            for (let i = 2; i <= Math.sqrt(num); i++) {
-                if (num % i === 0) return false;
-            }
-            return true;
-        };
-
-        const result = isPrime(n);
-        
-        return `
-            <h3>✅ Prime Number Analysis</h3>
-            <p><strong>${n}</strong> is ${result ? '' : 'NOT '}a prime number</p>
-            <p><strong>Quantum Verification:</strong> ${this.quantumBoost ? 'Enhanced' : 'Standard'} mode</p>
-            <p><strong>Phuoptimizer 81:</strong> Analysis complete</p>
-        `;
-    }
-
-    solveFactorial(n) {
-        if (n < 0 || n > 20) {
-            return `<p>Please enter a number between 0 and 20 for factorial calculation.</p>`;
-        }
-
-        let result = 1;
-        for (let i = 2; i <= n; i++) {
-            result *= i;
-        }
-
-        return `
-            <h3>✅ Factorial Solution</h3>
-            <p><strong>${n}!:</strong> ${result.toLocaleString()}</p>
-            <p><strong>Quantum Processing:</strong> ${this.entanglement}% entanglement utilized</p>
-            <p><strong>Phubers Enhancement:</strong> Active</p>
-        `;
-    }
-
-    analyzePattern(input) {
-        return `
-            <h3>✅ Pattern Analysis</h3>
-            <p><strong>Input:</strong> ${input}</p>
-            <p><strong>Quantum ZX Core Analysis:</strong> Pattern detected and analyzed</p>
-            <p><strong>Pattern Type:</strong> Complex sequential structure</p>
-            <p><strong>Optimization:</strong> Phuoptimizer 81 suggests recursive approach</p>
-            <p><strong>Confidence:</strong> ${this.entanglement}%</p>
-        `;
-    }
-
-    predictFuture(input) {
-        const predictions = [
-            'High probability of success in your endeavors',
-            'Quantum fluctuations indicate positive outcomes',
-            'The ZX Core predicts optimal results within 81 time units',
-            'Entanglement patterns suggest favorable circumstances',
-            'Future state: Coherent and optimized',
-            'Timeline convergence shows successful pathway'
-        ];
-        
-        const prediction = predictions[Math.floor(Math.random() * predictions.length)];
-
-        return `
-            <h3>🔮 Future Prediction</h3>
-            <p><strong>Query:</strong> ${input}</p>
-            <p><strong>Quantum ZX Core Prediction:</strong> ${prediction}</p>
-            <p><strong>Confidence Level:</strong> ${this.entanglement}%</p>
-            <p><strong>Time Horizon:</strong> ${Math.floor(Math.random() * 365)} days</p>
-            <p><strong>Phuoptimizer 81 Status:</strong> Calculation verified</p>
-            <p><em>Note: Predictions based on quantum probability analysis</em></p>
-        `;
-    }
-
-    quantumAnalysis(input) {
-        const analyses = [
-            'Your input has been processed through the Quantum ZX Core',
-            'Phu AI has analyzed the problem using quantum entanglement',
-            'The Phuoptimizer 81 suggests a multi-dimensional approach',
-            'Quantum superposition indicates multiple valid solutions',
-            'ZX Core has identified optimal pathways'
-        ];
-
-        const analysis = analyses[Math.floor(Math.random() * analyses.length)];
-
-        return `
-            <h3>🧠 Phu AI Analysis</h3>
-            <p><strong>Input:</strong> ${input}</p>
-            <p><strong>Analysis:</strong> ${analysis}</p>
-            <p><strong>Quantum State:</strong> ${this.quantumState}</p>
-            <p><strong>Entanglement:</strong> ${this.entanglement}%</p>
-            <p><strong>Optimization Level:</strong> ${this.optimizationLevel}/81</p>
-            <p><strong>Phubers Protocol:</strong> ${this.phubersProtocol.toUpperCase()}</p>
-            <p><strong>Recommendation:</strong> Continue with quantum-enhanced approach</p>
-        `;
-    }
-
-    extractNumber(text) {
-        const match = text.match(/\d+/);
-        return match ? parseInt(match[0]) : null;
-    }
-
-    showOutput(content, type) {
-        const output = document.getElementById('solutionOutput');
-        output.innerHTML = content;
-        output.classList.add('visible');
-        
-        if (type === 'error') {
-            output.style.borderLeftColor = '#dc3545';
-        } else if (type === 'success') {
-            output.style.borderLeftColor = '#28a745';
-        } else {
-            output.style.borderLeftColor = '#2e3192';
-        }
-    }
-
-    updateOptimizerStatus() {
-        const status = document.getElementById('optimizerStatus');
-        status.textContent = `Status: Optimization Level ${this.optimizationLevel} | ` +
-                           `Quantum Boost: ${this.quantumBoost ? 'ON' : 'OFF'} | ` +
-                           `Protocol: ${this.phubersProtocol.toUpperCase()}`;
-        
-        this.logActivity(`Configuration updated: Level ${this.optimizationLevel}, ${this.phubersProtocol} protocol`);
-    }
-
-    logActivity(message) {
-        const timestamp = new Date().toLocaleTimeString();
-        this.activityLog.unshift(`[${timestamp}] ${message}`);
-        
-        // Keep only last 20 entries
-        if (this.activityLog.length > 20) {
-            this.activityLog = this.activityLog.slice(0, 20);
-        }
-
-        this.updateActivityLog();
-    }
-
-    updateActivityLog() {
-        const logBox = document.getElementById('activityLog');
-        logBox.innerHTML = this.activityLog
-            .map(entry => `<div class="log-entry">${entry}</div>`)
-            .join('');
+    const allBid = game.players.every(pl => pl.bid !== null);
+    if (allBid) {
+        game.phase = 'playing';
+        game.currentPlayer = game.leadPlayer;
+        addLog('All bids placed — play begins!');
+        render();
+        processAITurn();
+    } else {
+        game.currentPlayer = (game.currentPlayer + 1) % game.numPlayers;
+        render();
+        processAITurn();
     }
 }
 
-// Initialize Phu AI when page loads
-window.addEventListener('DOMContentLoaded', () => {
-    const phuAI = new PhuAI();
-    
-    console.log('🧠 Phu AI initialized successfully!');
-    console.log('Phuoptimizer 81 & Phubers integration active');
-    console.log('Quantum ZX Core online');
+// ===== Card Play =====
+function playCard(playerIdx, cardIdx) {
+    if (game.phase !== 'playing') return;
+    if (playerIdx !== game.currentPlayer) return;
+
+    const p = game.players[playerIdx];
+    const card = p.hand[cardIdx];
+    if (!isValidPlay(card, p.hand, game.ledSuit)) return;
+
+    p.hand.splice(cardIdx, 1);
+
+    if (game.trick.length === 0) game.ledSuit = card.suit;
+    game.trick.push({ card, playerIdx });
+    addLog(`${p.name} plays ${card.rank}${card.suit}`);
+
+    render();
+
+    if (game.trick.length === game.numPlayers) {
+        setTimeout(evaluateTrick, 900);
+    } else {
+        game.currentPlayer = (game.currentPlayer + 1) % game.numPlayers;
+        render();
+        processAITurn();
+    }
+}
+
+function evaluateTrick() {
+    const winner = getTrickWinner(game.trick, game.ledSuit, game.trumpSuit);
+    game.players[winner.playerIdx].tricks++;
+    game.trickNumber++;
+
+    addLog(`↳ ${game.players[winner.playerIdx].name} wins trick ${game.trickNumber}`);
+
+    game.trick = [];
+    game.ledSuit = null;
+    game.currentPlayer = winner.playerIdx;
+
+    if (game.trickNumber === TOTAL_TRICKS) {
+        endRound();
+    } else {
+        render();
+        processAITurn();
+    }
+}
+
+// ===== Round End =====
+function endRound() {
+    game.phase = 'roundEnd';
+
+    for (const p of game.players) {
+        const delta = calculateScore(p.bid, p.tricks);
+        p.score += delta;
+        addLog(`${p.name}: bid ${p.bid}, got ${p.tricks} → ${delta >= 0 ? '+' : ''}${delta} (total ${p.score})`);
+    }
+
+    const winner = game.players.find(p => p.score >= WINNING_SCORE);
+    if (winner) {
+        game.phase = 'gameOver';
+    }
+
+    render();
+}
+
+// ===== AI Turn Dispatcher =====
+function processAITurn() {
+    const p = game.players[game.currentPlayer];
+    if (!p || p.isHuman) return;
+
+    if (game.phase === 'bidding') {
+        setTimeout(() => {
+            const bid = aiCalculateBid(p.hand, game.trumpSuit);
+            placeBid(bid);
+        }, 500);
+    } else if (game.phase === 'playing') {
+        setTimeout(() => {
+            const card = aiChooseCard(p, game.trick, game.ledSuit, game.trumpSuit, game.numPlayers);
+            const idx = p.hand.indexOf(card);
+            playCard(game.currentPlayer, idx);
+        }, 700);
+    }
+}
+
+// ===== Rendering =====
+function render() {
+    renderTrump();
+    renderScoreboard();
+    renderOpponents();
+    renderTrickArea();
+    renderPlayerHand();
+    renderBiddingPanel();
+    renderStatusBar();
+    renderRoundSummary();
+    renderGameOver();
+    renderLog();
+}
+
+function renderTrump() {
+    const el = document.getElementById('trump-display');
+    if (!game || !game.trumpSuit) { el.textContent = ''; return; }
+    el.innerHTML = `Trump: <span style="color:${SUIT_COLORS[game.trumpSuit] === 'red' ? '#ff6b6b' : '#fff'}">${SUIT_NAMES[game.trumpSuit]} ${game.trumpSuit}</span>`;
+}
+
+function renderScoreboard() {
+    const el = document.getElementById('scoreboard');
+    if (!game) { el.innerHTML = ''; return; }
+
+    el.innerHTML = game.players.map(p => {
+        const classes = ['score-card'];
+        if (p.isHuman) classes.push('human');
+        if (p.idx === game.currentPlayer && game.phase !== 'roundEnd' && game.phase !== 'gameOver') {
+            classes.push('active-player');
+        }
+        const bidText = p.bid !== null
+            ? `bid ${p.bid} | got ${p.tricks}`
+            : (game.phase === 'bidding' ? 'bidding…' : '');
+        return `<div class="${classes.join(' ')}">
+            <div class="score-name">${escHtml(p.name)}</div>
+            <div class="score-value">${p.score}</div>
+            <div class="score-bid">${bidText}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderOpponents() {
+    const el = document.getElementById('opponents-area');
+    if (!game) { el.innerHTML = ''; return; }
+
+    const opponents = game.players.filter(p => !p.isHuman);
+    el.innerHTML = opponents.map(p => {
+        const backs = p.hand.map(() => `<span class="card-back"></span>`).join('');
+        return `<div class="opponent-slot">
+            <div class="opponent-name">${escHtml(p.name)}</div>
+            <div class="card-backs">${backs}</div>
+        </div>`;
+    }).join('');
+}
+
+function renderTrickArea() {
+    const cardsEl = document.getElementById('trick-cards');
+    const labelEl = document.getElementById('trick-label');
+    if (!game) { cardsEl.innerHTML = ''; return; }
+
+    const trickNum = Math.min(game.trickNumber + 1, TOTAL_TRICKS);
+    labelEl.textContent = `Trick ${trickNum} of ${TOTAL_TRICKS}`;
+
+    if (game.trick.length === 0) {
+        cardsEl.innerHTML = '<span style="opacity:0.4;font-size:0.9em">Waiting for lead…</span>';
+        return;
+    }
+
+    const winnerEntry = getTrickWinner(game.trick, game.ledSuit, game.trumpSuit);
+
+    cardsEl.innerHTML = game.trick.map(entry => {
+        const isWinning = entry === winnerEntry;
+        const cardHtml = buildCardHtml(entry.card, ['played-in-trick', isWinning ? 'winning' : '']);
+        return `<div class="trick-card-wrap">
+            <div class="trick-player-name">${escHtml(game.players[entry.playerIdx].name)}</div>
+            ${cardHtml}
+        </div>`;
+    }).join('');
+}
+
+function renderPlayerHand() {
+    const handEl = document.getElementById('player-hand');
+    const infoEl = document.getElementById('player-info');
+    if (!game) { handEl.innerHTML = ''; return; }
+
+    const human = game.players[0];
+    const myTurn = game.phase === 'playing' && game.currentPlayer === 0;
+
+    infoEl.textContent = `${human.name} — Score: ${human.score}${human.bid !== null ? ` | Bid: ${human.bid} | Tricks: ${human.tricks}` : ''}`;
+
+    handEl.innerHTML = human.hand.map((card, i) => {
+        const playable = myTurn && isValidPlay(card, human.hand, game.ledSuit);
+        const classes = playable ? ['playable'] : [];
+        return `<div ${playable ? `onclick="onCardClick(${i})"` : ''}>
+            ${buildCardHtml(card, classes)}
+        </div>`;
+    }).join('');
+}
+
+function buildCardHtml(card, extraClasses = []) {
+    const color = SUIT_COLORS[card.suit];
+    const classes = ['card', color, ...extraClasses].filter(c => c).join(' ');
+    return `<div class="${classes}">
+        <div class="corner-top">${card.rank}<br>${card.suit}</div>
+        <div class="center-suit">${card.suit}</div>
+    </div>`;
+}
+
+function renderBiddingPanel() {
+    const panel = document.getElementById('bidding-panel');
+    const prompt = document.getElementById('bidding-prompt');
+    const btns = document.getElementById('bid-buttons');
+
+    if (!game || game.phase !== 'bidding' || game.players[game.currentPlayer].isHuman === false) {
+        panel.classList.add('hidden');
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    prompt.textContent = `Your turn to bid — how many tricks will you take? (Trump: ${SUIT_NAMES[game.trumpSuit]} ${game.trumpSuit})`;
+
+    btns.innerHTML = Array.from({ length: 14 }, (_, i) => {
+        const special = i === 13;
+        return `<button class="bid-btn${special ? ' special' : ''}" onclick="onBidClick(${i})">${i}</button>`;
+    }).join('');
+}
+
+function renderStatusBar() {
+    const el = document.getElementById('status-bar');
+    if (!game) { el.textContent = ''; return; }
+
+    if (game.phase === 'bidding') {
+        const p = game.players[game.currentPlayer];
+        if (!p.isHuman) {
+            el.textContent = `${p.name} is bidding…`;
+        } else {
+            el.textContent = 'Your turn to bid — select a number above.';
+        }
+    } else if (game.phase === 'playing') {
+        const p = game.players[game.currentPlayer];
+        if (!p.isHuman) {
+            el.textContent = `${p.name} is playing…`;
+        } else {
+            const canPlay = game.ledSuit
+                ? (game.players[0].hand.some(c => c.suit === game.ledSuit) ? `You must follow suit (${SUIT_NAMES[game.ledSuit]})` : 'You may play any card')
+                : 'You lead — click a card to play';
+            el.textContent = canPlay;
+        }
+    } else {
+        el.textContent = '';
+    }
+}
+
+function renderRoundSummary() {
+    const overlay = document.getElementById('round-summary');
+    if (!game || game.phase !== 'roundEnd') {
+        overlay.classList.add('hidden');
+        return;
+    }
+
+    document.getElementById('summary-round').textContent = game.roundNumber;
+    const table = document.getElementById('summary-table');
+    const maxScore = Math.max(...game.players.map(p => p.score));
+
+    table.innerHTML = `<thead><tr>
+        <th>Player</th><th>Bid</th><th>Tricks</th><th>Round</th><th>Total</th>
+    </tr></thead><tbody>` +
+    game.players.map(p => {
+        const delta = calculateScore(p.bid, p.tricks);
+        const isLeader = p.score === maxScore;
+        return `<tr class="${isLeader ? 'leader-row' : ''}">
+            <td>${escHtml(p.name)}${p.isHuman ? ' 👤' : ''}</td>
+            <td>${p.bid}</td>
+            <td>${p.tricks}</td>
+            <td class="${delta >= 0 ? 'score-gain' : 'score-loss'}">${delta >= 0 ? '+' : ''}${delta}</td>
+            <td><strong>${p.score}</strong></td>
+        </tr>`;
+    }).join('') + '</tbody>';
+
+    overlay.classList.remove('hidden');
+}
+
+function renderGameOver() {
+    const overlay = document.getElementById('gameover-overlay');
+    if (!game || game.phase !== 'gameOver') {
+        overlay.classList.add('hidden');
+        return;
+    }
+
+    const winner = game.players.reduce((best, p) => p.score > best.score ? p : best);
+    document.getElementById('gameover-title').textContent = winner.isHuman ? '🎉 You Win!' : `${winner.name} Wins!`;
+    document.getElementById('gameover-message').textContent =
+        `${winner.name} reached ${winner.score} points and wins the game!`;
+
+    const table = document.getElementById('final-table');
+    const sorted = [...game.players].sort((a, b) => b.score - a.score);
+    table.innerHTML = `<thead><tr><th>Place</th><th>Player</th><th>Score</th></tr></thead><tbody>` +
+    sorted.map((p, i) => `<tr class="${i === 0 ? 'leader-row' : ''}">
+        <td>${i + 1}</td>
+        <td>${escHtml(p.name)}${p.isHuman ? ' 👤' : ''}</td>
+        <td><strong>${p.score}</strong></td>
+    </tr>`).join('') + '</tbody>';
+
+    overlay.classList.remove('hidden');
+}
+
+function renderLog() {
+    const el = document.getElementById('game-log');
+    if (!game) { el.innerHTML = ''; return; }
+    el.innerHTML = game.log.map(e => `<div class="log-entry">${escHtml(e)}</div>`).join('');
+}
+
+// ===== Event Handlers =====
+function onCardClick(cardIdx) {
+    if (!game || game.phase !== 'playing' || game.currentPlayer !== 0) return;
+    playCard(0, cardIdx);
+}
+
+function onBidClick(bid) {
+    if (!game || game.phase !== 'bidding' || game.currentPlayer !== 0) return;
+    placeBid(bid);
+}
+
+// ===== Utility =====
+function escHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// ===== Setup UI =====
+document.addEventListener('DOMContentLoaded', () => {
+    let selectedPlayerCount = 2;
+
+    // Player count buttons
+    document.querySelectorAll('.count-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            selectedPlayerCount = parseInt(btn.dataset.count, 10);
+        });
+    });
+
+    // Start game
+    document.getElementById('startGameBtn').addEventListener('click', () => {
+        const name = document.getElementById('playerName').value.trim() || 'You';
+        game = createGame(selectedPlayerCount, name);
+        switchScreen('game-screen');
+        startRound();
+    });
+
+    // New game button (in game header)
+    document.getElementById('newGameBtn').addEventListener('click', () => {
+        switchScreen('setup-screen');
+        game = null;
+    });
+
+    // Next round button
+    document.getElementById('nextRoundBtn').addEventListener('click', () => {
+        document.getElementById('round-summary').classList.add('hidden');
+        startRound();
+    });
+
+    // Play again button
+    document.getElementById('playAgainBtn').addEventListener('click', () => {
+        document.getElementById('gameover-overlay').classList.add('hidden');
+        switchScreen('setup-screen');
+        game = null;
+    });
 });
+
+function switchScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+}

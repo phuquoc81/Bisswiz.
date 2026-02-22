@@ -3,96 +3,113 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phu AI - Quantum Puzzle Solver</title>
+    <title>Bisswiz Card Game</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>🧠 Phu AI</h1>
-            <p class="subtitle">Quantum ZX Core Puzzle & Problem Solver</p>
-            <div class="brand-badges">
-                <span class="badge">Phuoptimizer 81</span>
-                <span class="badge">Phubers Integration</span>
-                <a href="https://youtube.com/@helloPhu" target="_blank" class="badge youtube-badge">
-                    📺 helloPhú YouTube
-                </a>
+
+    <!-- Setup Screen -->
+    <div id="setup-screen" class="screen active">
+        <div class="setup-card">
+            <h1>🃏 Bisswiz</h1>
+            <p class="tagline">The trick-taking card game — first to 500 points wins!</p>
+
+            <div class="setup-section">
+                <label>Number of Players</label>
+                <div class="player-count-btns">
+                    <button class="count-btn active" data-count="2">2 Players</button>
+                    <button class="count-btn" data-count="4">4 Players</button>
+                </div>
             </div>
-        </header>
 
-        <main>
-            <!-- Quantum ZX Core Display -->
-            <section class="quantum-core">
-                <h2>⚛️ Quantum ZX Core Status</h2>
-                <div class="quantum-display">
-                    <canvas id="quantumCanvas"></canvas>
-                    <div class="quantum-stats">
-                        <div class="stat">
-                            <span class="label">Quantum State:</span>
-                            <span id="quantumState" class="value">Superposition</span>
-                        </div>
-                        <div class="stat">
-                            <span class="label">Entanglement:</span>
-                            <span id="entanglement" class="value">81%</span>
-                        </div>
-                        <div class="stat">
-                            <span class="label">Future Prediction:</span>
-                            <span id="prediction" class="value">Calculating...</span>
-                        </div>
-                    </div>
-                </div>
-            </section>
+            <div class="setup-section">
+                <label for="playerName">Your Name</label>
+                <input type="text" id="playerName" placeholder="Enter your name" maxlength="20">
+            </div>
 
-            <!-- Puzzle Solver -->
-            <section class="solver-section">
-                <h2>🧩 Puzzle Solver</h2>
-                <div class="input-group">
-                    <label for="puzzleInput">Enter your puzzle or problem:</label>
-                    <textarea id="puzzleInput" placeholder="Example: What is 2 + 2? or Solve the Fibonacci sequence for n=10"></textarea>
-                </div>
-                <button id="solveBtn" class="btn-primary">🔮 Solve with Phu AI</button>
-                <div id="solutionOutput" class="output-box"></div>
-            </section>
+            <div class="setup-section rules-summary">
+                <h3>Scoring Rules</h3>
+                <ul>
+                    <li>Bid &amp; make <strong>13 tricks</strong> &rarr; <span class="pos">+260</span> points</li>
+                    <li>Bid 13 but <strong>miss</strong> &rarr; <span class="neg">&minus;260</span> points</li>
+                    <li>Bid X, get <strong>&ge; X tricks</strong> &rarr; <span class="pos">+10&times;X</span> points</li>
+                    <li>Bid X, get <strong>&lt; X tricks</strong> &rarr; <span class="neg">&minus;10&times;X</span> points</li>
+                    <li>Over-tricks <strong>don't</strong> earn extra points</li>
+                    <li>First to <strong>500 points</strong> wins!</li>
+                </ul>
+            </div>
 
-            <!-- Phuoptimizer 81 Control Panel -->
-            <section class="phuoptimizer-section">
-                <h2>⚙️ Phuoptimizer 81 Control</h2>
-                <div class="control-panel">
-                    <div class="control-item">
-                        <label>Optimization Level:</label>
-                        <input type="range" id="optLevel" min="1" max="81" value="81">
-                        <span id="optLevelValue">81</span>
-                    </div>
-                    <div class="control-item">
-                        <label>Quantum Boost:</label>
-                        <input type="checkbox" id="quantumBoost" checked>
-                        <span class="toggle-label">Enabled</span>
-                    </div>
-                    <div class="control-item">
-                        <label>Phubers Protocol:</label>
-                        <select id="phubersProtocol">
-                            <option value="standard">Standard</option>
-                            <option value="advanced">Advanced</option>
-                            <option value="quantum" selected>Quantum</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="optimizerStatus" class="status-box">
-                    Status: Ready
-                </div>
-            </section>
+            <button id="startGameBtn" class="btn-primary">Start Game</button>
+        </div>
+    </div>
 
-            <!-- AI History Log -->
-            <section class="history-section">
-                <h2>📊 AI Activity Log</h2>
-                <div id="activityLog" class="log-box"></div>
-            </section>
-        </main>
+    <!-- Game Screen -->
+    <div id="game-screen" class="screen">
 
-        <footer>
-            <p>Powered by Phu AI &copy; 2026 | Quantum ZX Core Technology</p>
-            <p>Integrated with Phuoptimizer 81 & Phubers</p>
-        </footer>
+        <!-- Header bar -->
+        <div class="game-header">
+            <span class="game-title">🃏 Bisswiz</span>
+            <div id="trump-display" class="trump-display"></div>
+            <button id="newGameBtn" class="btn-sm">New Game</button>
+        </div>
+
+        <!-- Scoreboard -->
+        <div id="scoreboard" class="scoreboard"></div>
+
+        <!-- Table area -->
+        <div class="table-area">
+
+            <!-- Opponents' area (card backs + names) -->
+            <div id="opponents-area" class="opponents-area"></div>
+
+            <!-- Current trick in center -->
+            <div id="trick-area" class="trick-area">
+                <div id="trick-cards" class="trick-cards"></div>
+                <div id="trick-label" class="trick-label">Trick 1 of 13</div>
+            </div>
+
+        </div>
+
+        <!-- Human player's hand -->
+        <div class="player-area">
+            <div id="player-info" class="player-info"></div>
+            <div id="player-hand" class="player-hand"></div>
+        </div>
+
+        <!-- Bidding panel -->
+        <div id="bidding-panel" class="bidding-panel hidden">
+            <p id="bidding-prompt" class="bidding-prompt"></p>
+            <div id="bid-buttons" class="bid-buttons"></div>
+        </div>
+
+        <!-- Status / message bar -->
+        <div id="status-bar" class="status-bar"></div>
+
+        <!-- Round summary overlay -->
+        <div id="round-summary" class="overlay hidden">
+            <div class="overlay-card">
+                <h2>Round <span id="summary-round"></span> Complete</h2>
+                <table id="summary-table" class="summary-table"></table>
+                <button id="nextRoundBtn" class="btn-primary">Next Round</button>
+            </div>
+        </div>
+
+        <!-- Game over overlay -->
+        <div id="gameover-overlay" class="overlay hidden">
+            <div class="overlay-card">
+                <h2 id="gameover-title">&#127881; Game Over!</h2>
+                <p id="gameover-message"></p>
+                <table id="final-table" class="summary-table"></table>
+                <button id="playAgainBtn" class="btn-primary">Play Again</button>
+            </div>
+        </div>
+
+        <!-- Game Log -->
+        <details class="game-log-details">
+            <summary>Game Log</summary>
+            <div id="game-log" class="game-log"></div>
+        </details>
+
     </div>
 
     <script src="script.js"></script>
